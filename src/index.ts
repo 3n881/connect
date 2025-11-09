@@ -1680,842 +1680,7 @@
 
 
 
-// // server/index.ts - Optimized with caching and better image handling
-// import express, { Request, Response } from 'express';
-// import cors from 'cors';
-// import crypto from 'crypto';
-// import Razorpay from 'razorpay';
-// import { RtcTokenBuilder, RtcRole } from 'agora-access-token';
-// import dotenv from 'dotenv';
-// import axios from 'axios';
-// import NodeCache from 'node-cache';
-
-// dotenv.config();
-
-// const app = express();
-// const PORT = process.env.PORT || 3000;
-
-// // Initialize cache with 15 minute TTL
-// const eventCache = new NodeCache({ stdTTL: 900, checkperiod: 120 });
-// const tokenCache = new NodeCache({ stdTTL: 86000 }); // 23.8 hours
-
-// // Middleware
-// app.use(cors({
-//   origin: '*',
-//   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-//   allowedHeaders: ['Content-Type', 'Authorization']
-// }));
-// app.use(express.json());
-// app.use(express.urlencoded({ extended: true }));
-
-// // Initialize Razorpay
-// const razorpay = new Razorpay({
-//   key_id: process.env.RAZORPAY_KEY_ID!,
-//   key_secret: process.env.RAZORPAY_KEY_SECRET!,
-// });
-
-// // Configuration
-// const AGORA_APP_ID = process.env.AGORA_APP_ID!;
-// const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE!;
-// const SERPAPI_KEY = process.env.SERPAPI_KEY!;
-// const SERPAPI_BASE_URL = 'https://serpapi.com/search.json';
-
-// // State to major city mapping
-// const STATE_MAJOR_CITIES: Record<string, string> = {
-//   'Maharashtra': 'Mumbai, Maharashtra',
-//   'Delhi': 'Delhi, Delhi',
-//   'Karnataka': 'Bangalore, Karnataka',
-//   'Telangana': 'Hyderabad, Telangana',
-//   'Tamil Nadu': 'Chennai, Tamil Nadu',
-//   'West Bengal': 'Kolkata, West Bengal',
-//   'Gujarat': 'Ahmedabad, Gujarat',
-//   'Rajasthan': 'Jaipur, Rajasthan',
-//   'Uttar Pradesh': 'Lucknow, Uttar Pradesh',
-//   'Madhya Pradesh': 'Indore, Madhya Pradesh',
-//   'Punjab': 'Chandigarh, Punjab',
-//   'Kerala': 'Kochi, Kerala',
-//   'Goa': 'Panaji, Goa',
-// };
-
-// function getFallbackCity(location: string): string {
-//   const parts = location.split(',').map(s => s.trim());
-//   if (parts.length >= 2) {
-//     const state = parts[1];
-//     return STATE_MAJOR_CITIES[state] || 'Mumbai, Maharashtra';
-//   }
-//   return 'Mumbai, Maharashtra';
-// }
-
-// // Validate environment variables
-// if (!AGORA_APP_ID || !AGORA_APP_CERTIFICATE) {
-//   console.error('❌ AGORA_APP_ID and AGORA_APP_CERTIFICATE must be set');
-// }
-// if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-//   console.error('❌ RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set');
-// }
-// if (!SERPAPI_KEY) {
-//   console.warn('⚠️  WARNING: SERPAPI_KEY not set. Event fetching disabled.');
-// }
-
-// // ============================================
-// // OPTIMIZED GOOGLE EVENTS API
-// // ============================================
-
-// /**
-//  * Extract best quality image from event data
-//  */
-// function extractBestImage(event: any): string {
-//   // Priority order for images
-//   const imageOptions = [
-//     event.thumbnail,
-//     event.image,
-//     event.event_location_map?.image,
-//     event.venue?.thumbnail,
-//     event.venue?.image,
-//   ];
-
-//   for (const img of imageOptions) {
-//     if (img && typeof img === 'string' && img.startsWith('http')) {
-//       // Try to get higher resolution version
-//       return img.replace(/=s\d+/, '=s1200').replace(/\/w\d+/, '/w1200');
-//     }
-//   }
-
-//   return 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800';
-// }
-
-// /**
-//  * Optimized event fetching with caching
-//  */
-// async function fetchEventsFromSerpAPI(
-//   location: string, 
-//   category?: string, 
-//   dateFilter?: string, 
-//   onlineOnly?: boolean, 
-//   retryWithFallback: boolean = true
-// ): Promise<any> {
-//   // Generate cache key
-//   const cacheKey = `events:${location}:${category || 'all'}:${dateFilter || 'all'}:${onlineOnly || false}`;
-  
-//   // Check cache first
-//   const cached = eventCache.get(cacheKey);
-//   if (cached) {
-//     console.log('✅ Returning cached events for:', location);
-//     return cached;
-//   }
-
-//   try {
-//     // Build query
-//     let query = `Events in ${location}`;
-//     if (category) {
-//       query = `${category} events in ${location}`;
-//     }
-
-//     // Build filters
-//     let htichips = '';
-//     const filters = [];
-    
-//     if (dateFilter) {
-//       filters.push(`date:${dateFilter}`);
-//     }
-    
-//     if (onlineOnly) {
-//       filters.push('event_type:Virtual-Event');
-//     }
-    
-//     if (filters.length > 0) {
-//       htichips = filters.join(',');
-//     }
-
-//     console.log('🔍 Fetching events:', { query, htichips, location });
-
-//     // Call SerpAPI with timeout
-//     const params: any = {
-//       engine: 'google_events',
-//       q: query,
-//       hl: 'en',
-//       gl: 'in',
-//       api_key: SERPAPI_KEY,
-//       num: 50, // Get more results
-//     };
-
-//     if (htichips) {
-//       params.htichips = htichips;
-//     }
-
-//     const response = await axios.get(SERPAPI_BASE_URL, { 
-//       params,
-//       timeout: 8000 // 8 second timeout
-//     });
-
-//     if (response.data.error) {
-//       console.error('SerpAPI error:', response.data.error);
-      
-//       if (retryWithFallback) {
-//         const fallbackCity = getFallbackCity(location);
-//         if (fallbackCity !== location) {
-//           console.log(`Trying fallback city: ${fallbackCity}`);
-//           return await fetchEventsFromSerpAPI(fallbackCity, category, dateFilter, onlineOnly, false);
-//         }
-//       }
-      
-//       throw new Error(response.data.error);
-//     }
-
-//     const events = response.data.events_results || [];
-
-//     // Fallback if no events
-//     if (events.length === 0 && retryWithFallback) {
-//       const fallbackCity = getFallbackCity(location);
-//       if (fallbackCity !== location) {
-//         console.log(`No events in ${location}, trying: ${fallbackCity}`);
-//         return await fetchEventsFromSerpAPI(fallbackCity, category, dateFilter, onlineOnly, false);
-//       }
-//     }
-
-//     const result = {
-//       events,
-//       location: events.length > 0 ? location : getFallbackCity(location),
-//       searchMetadata: response.data.search_metadata,
-//       cached: false,
-//       timestamp: new Date().toISOString()
-//     };
-
-//     // Cache the result
-//     eventCache.set(cacheKey, result);
-    
-//     return result;
-
-//   } catch (error) {
-//     console.error('Error fetching from SerpAPI:', error);
-    
-//     if (retryWithFallback) {
-//       const fallbackCity = getFallbackCity(location);
-//       if (fallbackCity !== location) {
-//         console.log(`Error in ${location}, trying: ${fallbackCity}`);
-//         try {
-//           return await fetchEventsFromSerpAPI(fallbackCity, category, dateFilter, onlineOnly, false);
-//         } catch (fallbackError) {
-//           throw error;
-//         }
-//       }
-//     }
-    
-//     throw error;
-//   }
-// }
-
-// /**
-//  * Transform event data with optimized image handling
-//  */
-// function transformEvent(event: any, category?: string): any {
-//   return {
-//     id: crypto.randomBytes(16).toString('hex'),
-//     title: event.title,
-//     description: event.description || '',
-//     coverImage: extractBestImage(event),
-//     venue: event.address?.[0] || event.venue?.name || 'Venue TBA',
-//     address: event.address?.join(', ') || '',
-//     location: event.venue?.gps_coordinates || null,
-//     startTime: parseEventDate(event.date?.start_date, event.date?.when),
-//     endTime: parseEventDate(event.date?.start_date, event.date?.when, true),
-//     price: extractPrice(event.ticket_info),
-//     capacity: extractCapacity(event.venue),
-//     attendeesCount: Math.floor(Math.random() * 50),
-//     category: mapCategory(category || event.title),
-//     tags: extractTags(event.title, event.description),
-//     organizer: {
-//       name: event.venue?.name || 'Event Organizer',
-//       image: event.venue?.thumbnail || '',
-//       rating: event.venue?.rating || 0,
-//       verified: event.venue?.rating ? event.venue.rating >= 4.0 : false
-//     },
-//     ticketInfo: event.ticket_info || [],
-//     externalLink: event.link || '',
-//     isOnline: event.date?.when?.toLowerCase().includes('online') || false,
-//     allowMatchmaking: true,
-//     featured: event.venue?.rating ? event.venue.rating >= 4.5 : false,
-//     createdAt: new Date().toISOString(),
-//     updatedAt: new Date().toISOString()
-//   };
-// }
-
-// /**
-//  * Fetch events by location
-//  * POST /api/events/fetch
-//  */
-// app.post('/api/events/fetch', async (req: Request, res: Response) => {
-//   try {
-//     const { location, category, dateFilter, onlineOnly } = req.body;
-
-//     if (!location) {
-//       return res.status(400).json({
-//         success: false,
-//         error: 'Location is required'
-//       });
-//     }
-
-//     if (!SERPAPI_KEY) {
-//       return res.status(503).json({
-//         success: false,
-//         error: 'SerpAPI key not configured'
-//       });
-//     }
-
-//     const result = await fetchEventsFromSerpAPI(location, category, dateFilter, onlineOnly);
-//     const events = result.events || [];
-
-//     const transformedEvents = events.map((event: any) => transformEvent(event, category));
-
-//     console.log(`✅ Fetched ${transformedEvents.length} events for ${result.location}`);
-
-//     res.json({
-//       success: true,
-//       count: transformedEvents.length,
-//       location: result.location,
-//       originalLocation: location,
-//       usedFallback: result.location !== location,
-//       cached: result.cached || false,
-//       events: transformedEvents,
-//       timestamp: result.timestamp
-//     });
-
-//   } catch (error) {
-//     console.error('❌ Error fetching events:', error);
-//     res.status(500).json({
-//       success: false,
-//       error: 'Failed to fetch events',
-//       details: error instanceof Error ? error.message : 'Unknown error'
-//     });
-//   }
-// });
-
-// /**
-//  * Fetch events by coordinates (optimized)
-//  * POST /api/events/fetch-nearby
-//  */
-// app.post('/api/events/fetch-nearby', async (req: Request, res: Response) => {
-//   try {
-//     const { latitude, longitude, radius = 25, category, cityName } = req.body;
-
-//     if (!latitude || !longitude) {
-//       return res.status(400).json({
-//         success: false,
-//         error: 'Latitude and longitude are required'
-//       });
-//     }
-
-//     const location = cityName || 'Mumbai, India';
-
-//     const result = await fetchEventsFromSerpAPI(location, category);
-//     const events = result.events || [];
-
-//     const transformedEvents = events.map((event: any) => ({
-//       ...transformEvent(event, category),
-//       location: event.venue?.gps_coordinates || { latitude, longitude }
-//     }));
-
-//     res.json({
-//       success: true,
-//       count: transformedEvents.length,
-//       location: result.location,
-//       originalLocation: location,
-//       usedFallback: result.location !== location,
-//       cached: result.cached || false,
-//       coordinates: { latitude, longitude },
-//       radius,
-//       events: transformedEvents,
-//       timestamp: result.timestamp
-//     });
-
-//   } catch (error) {
-//     console.error('❌ Error fetching nearby events:', error);
-//     res.status(500).json({
-//       success: false,
-//       error: 'Failed to fetch nearby events',
-//       details: error instanceof Error ? error.message : 'Unknown error'
-//     });
-//   }
-// });
-
-// /**
-//  * Get featured events (cached)
-//  * GET /api/events/featured
-//  */
-// app.get('/api/events/featured', async (req: Request, res: Response) => {
-//   try {
-//     const { limit = 10, location = 'Mumbai, India' } = req.query;
-
-//     if (!SERPAPI_KEY) {
-//       return res.status(503).json({
-//         success: false,
-//         error: 'SerpAPI key not configured'
-//       });
-//     }
-
-//     const result = await fetchEventsFromSerpAPI(location as string, undefined, undefined, undefined, true);
-//     const events = result.events || [];
-
-//     const featuredEvents = events
-//       .filter((e: any) => e.venue?.rating && e.venue.rating >= 4.0)
-//       .slice(0, parseInt(limit as string))
-//       .map((event: any) => transformEvent(event));
-
-//     res.json({
-//       success: true,
-//       count: featuredEvents.length,
-//       location: result.location,
-//       usedFallback: result.location !== location,
-//       cached: result.cached || false,
-//       events: featuredEvents,
-//       timestamp: result.timestamp
-//     });
-
-//   } catch (error) {
-//     console.error('❌ Error fetching featured events:', error);
-//     res.status(500).json({
-//       success: false,
-//       error: 'Failed to fetch featured events',
-//       details: error instanceof Error ? error.message : 'Unknown error'
-//     });
-//   }
-// });
-
-// /**
-//  * Search events (optimized)
-//  * GET /api/events/search
-//  */
-// app.get('/api/events/search', async (req: Request, res: Response) => {
-//   try {
-//     const { q, location = 'Mumbai, India', category, dateFilter } = req.query;
-
-//     if (!q) {
-//       return res.status(400).json({
-//         success: false,
-//         error: 'Search query is required'
-//       });
-//     }
-
-//     if (!SERPAPI_KEY) {
-//       return res.status(503).json({
-//         success: false,
-//         error: 'SerpAPI key not configured'
-//       });
-//     }
-
-//     const result = await fetchEventsFromSerpAPI(location as string, undefined, dateFilter as string, undefined, true);
-//     const events = result.events || [];
-
-//     const filteredEvents = events
-//       .filter((event: any) => {
-//         const searchText = `${event.title} ${event.description}`.toLowerCase();
-//         return searchText.includes((q as string).toLowerCase());
-//       })
-//       .map((event: any) => transformEvent(event, category as string));
-
-//     res.json({
-//       success: true,
-//       count: filteredEvents.length,
-//       query: q,
-//       location: result.location,
-//       usedFallback: result.location !== location,
-//       cached: result.cached || false,
-//       events: filteredEvents,
-//       timestamp: result.timestamp
-//     });
-
-//   } catch (error) {
-//     console.error('❌ Error searching events:', error);
-//     res.status(500).json({
-//       success: false,
-//       error: 'Failed to search events',
-//       details: error instanceof Error ? error.message : 'Unknown error'
-//     });
-//   }
-// });
-
-// // ============================================
-// // HELPER FUNCTIONS
-// // ============================================
-
-// function parseEventDate(startDate: string, when: string, isEndTime = false): string {
-//   try {
-//     const now = new Date();
-//     const currentYear = now.getFullYear();
-    
-//     if (!startDate) return now.toISOString();
-
-//     const dateStr = `${startDate} ${currentYear}`;
-//     const date = new Date(dateStr);
-
-//     if (when && when.includes(':')) {
-//       const timeMatch = when.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-//       if (timeMatch) {
-//         let hours = parseInt(timeMatch[1]);
-//         const minutes = parseInt(timeMatch[2]);
-//         const meridiem = timeMatch[3]?.toUpperCase();
-
-//         if (meridiem === 'PM' && hours !== 12) hours += 12;
-//         if (meridiem === 'AM' && hours === 12) hours = 0;
-
-//         date.setHours(hours, minutes, 0, 0);
-
-//         if (isEndTime) {
-//           date.setHours(date.getHours() + 3);
-//         }
-//       }
-//     }
-
-//     return date.toISOString();
-//   } catch (error) {
-//     return new Date().toISOString();
-//   }
-// }
-
-// function extractPrice(ticketInfo: any[]): number {
-//   if (!ticketInfo || ticketInfo.length === 0) return 0;
-
-//   for (const ticket of ticketInfo) {
-//     const priceMatch = ticket.source?.match(/₹(\d+)/);
-//     if (priceMatch) {
-//       return parseInt(priceMatch[1]);
-//     }
-//   }
-
-//   return ticketInfo.some(t => t.link_type === 'tickets') ? 500 : 0;
-// }
-
-// function extractCapacity(venue: any): number {
-//   if (!venue) return 100;
-  
-//   const reviews = venue.reviews || 0;
-//   if (reviews > 1000) return 500;
-//   if (reviews > 500) return 300;
-//   if (reviews > 100) return 150;
-//   return 100;
-// }
-
-// function mapCategory(input: string): string {
-//   const lower = input.toLowerCase();
-  
-//   if (lower.includes('concert') || lower.includes('music')) return 'concert';
-//   if (lower.includes('comedy')) return 'comedy';
-//   if (lower.includes('sport')) return 'sports';
-//   if (lower.includes('theater') || lower.includes('drama')) return 'theater';
-//   if (lower.includes('workshop') || lower.includes('class')) return 'workshop';
-//   if (lower.includes('networking') || lower.includes('meetup')) return 'networking';
-//   if (lower.includes('food') || lower.includes('restaurant')) return 'food';
-//   if (lower.includes('nightlife') || lower.includes('club')) return 'nightlife';
-//   if (lower.includes('art') || lower.includes('gallery')) return 'art';
-//   if (lower.includes('fitness') || lower.includes('yoga')) return 'fitness';
-//   if (lower.includes('spiritual') || lower.includes('meditation')) return 'spiritual';
-//   if (lower.includes('festival')) return 'festival';
-//   if (lower.includes('dating') || lower.includes('speed dating')) return 'dating';
-  
-//   return 'other';
-// }
-
-// function extractTags(title: string, description: string): string[] {
-//   const tags: Set<string> = new Set();
-//   const text = `${title} ${description}`.toLowerCase();
-  
-//   const keywords = [
-//     'live', 'virtual', 'online', 'outdoor', 'indoor',
-//     'weekend', 'night', 'day', 'family', 'couples',
-//     'singles', 'professional', 'casual', 'formal',
-//     'free', 'paid', 'premium', 'exclusive'
-//   ];
-
-//   keywords.forEach(keyword => {
-//     if (text.includes(keyword)) {
-//       tags.add(keyword);
-//     }
-//   });
-
-//   return Array.from(tags).slice(0, 5);
-// }
-
-// // ============================================
-// // OPTIMIZED AGORA ENDPOINTS
-// // ============================================
-
-// app.post('/api/agora/token', (req: Request, res: Response) => {
-//   try {
-//     const { channelName, uid = 0, role = 'publisher' } = req.body;
-
-//     if (!channelName) {
-//       return res.status(400).json({ 
-//         success: false,
-//         error: 'Channel name is required' 
-//       });
-//     }
-
-//     if (!AGORA_APP_ID || !AGORA_APP_CERTIFICATE) {
-//       return res.status(500).json({ 
-//         success: false,
-//         error: 'Agora credentials not configured' 
-//       });
-//     }
-
-//     // Check cache first
-//     const cacheKey = `agora:${channelName}:${uid}:${role}`;
-//     const cached = tokenCache.get(cacheKey);
-    
-//     if (cached) {
-//       console.log('✅ Returning cached Agora token');
-//       return res.json(cached);
-//     }
-
-//     const uidNum = parseInt(uid.toString()) || 0;
-//     const userRole = role === 'publisher' ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
-    
-//     const expirationTimeInSeconds = 86400; // 24 hours
-//     const currentTimestamp = Math.floor(Date.now() / 1000);
-//     const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
-
-//     const token = RtcTokenBuilder.buildTokenWithUid(
-//       AGORA_APP_ID,
-//       AGORA_APP_CERTIFICATE,
-//       channelName,
-//       uidNum,
-//       userRole,
-//       privilegeExpiredTs
-//     );
-
-//     const result = {
-//       success: true,
-//       token,
-//       appId: AGORA_APP_ID,
-//       channelName,
-//       uid: uidNum,
-//       expiresAt: privilegeExpiredTs,
-//       cached: false
-//     };
-
-//     // Cache the token
-//     tokenCache.set(cacheKey, result);
-
-//     res.json(result);
-//   } catch (error) {
-//     console.error('❌ Error generating Agora token:', error);
-//     res.status(500).json({ 
-//       success: false,
-//       error: 'Failed to generate token',
-//       details: error instanceof Error ? error.message : 'Unknown error'
-//     });
-//   }
-// });
-
-// app.get('/api/agora/test', (req: Request, res: Response) => {
-//   res.json({
-//     success: true,
-//     configured: !!(AGORA_APP_ID && AGORA_APP_CERTIFICATE),
-//     appId: AGORA_APP_ID ? AGORA_APP_ID.substring(0, 8) + '...' : 'NOT SET',
-//     certificate: AGORA_APP_CERTIFICATE ? 'SET' : 'NOT SET'
-//   });
-// });
-
-// // ============================================
-// // RAZORPAY ENDPOINTS
-// // ============================================
-
-// app.post('/api/razorpay/create-order', async (req: Request, res: Response) => {
-//   try {
-//     const { amount, currency = 'INR', receipt, notes } = req.body;
-
-//     if (!amount || amount <= 0) {
-//       return res.status(400).json({ 
-//         success: false,
-//         error: 'Valid amount is required' 
-//       });
-//     }
-
-//     const options = {
-//       amount: Math.round(amount * 100),
-//       currency,
-//       receipt: receipt || `receipt_${Date.now()}`,
-//       notes: notes || {},
-//     };
-
-//     const order = await razorpay.orders.create(options);
-
-//     res.json({
-//       success: true,
-//       orderId: order.id,
-//       amount: order.amount,
-//       currency: order.currency,
-//       receipt: order.receipt,
-//     });
-//   } catch (error) {
-//     console.error('❌ Error creating Razorpay order:', error);
-//     res.status(500).json({ 
-//       success: false,
-//       error: 'Failed to create order',
-//       details: error instanceof Error ? error.message : 'Unknown error'
-//     });
-//   }
-// });
-
-// app.post('/api/razorpay/verify-payment', (req: Request, res: Response) => {
-//   try {
-//     const { orderId, paymentId, signature } = req.body;
-
-//     if (!orderId || !paymentId || !signature) {
-//       return res.status(400).json({ 
-//         success: false,
-//         error: 'Missing required fields' 
-//       });
-//     }
-
-//     const generatedSignature = crypto
-//       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
-//       .update(`${orderId}|${paymentId}`)
-//       .digest('hex');
-
-//     const isValid = generatedSignature === signature;
-
-//     res.json({
-//       success: true,
-//       verified: isValid,
-//       message: isValid ? 'Payment verified successfully' : 'Invalid payment signature',
-//     });
-//   } catch (error) {
-//     console.error('❌ Error verifying payment:', error);
-//     res.status(500).json({ 
-//       success: false,
-//       error: 'Failed to verify payment',
-//       details: error instanceof Error ? error.message : 'Unknown error'
-//     });
-//   }
-// });
-
-// app.get('/api/razorpay/payment/:paymentId', async (req: Request, res: Response) => {
-//   try {
-//     const { paymentId } = req.params;
-//     const payment = await razorpay.payments.fetch(paymentId);
-//     res.json({ success: true, payment });
-//   } catch (error) {
-//     console.error('❌ Error fetching payment:', error);
-//     res.status(500).json({ 
-//       success: false,
-//       error: 'Failed to fetch payment',
-//       details: error instanceof Error ? error.message : 'Unknown error'
-//     });
-//   }
-// });
-
-// app.post('/api/razorpay/refund', async (req: Request, res: Response) => {
-//   try {
-//     const { paymentId, amount } = req.body;
-//     const refundOptions: any = amount ? { amount: Math.round(amount * 100) } : {};
-//     const refund = await razorpay.payments.refund(paymentId, refundOptions);
-//     res.json({ success: true, refund });
-//   } catch (error) {
-//     console.error('❌ Error creating refund:', error);
-//     res.status(500).json({ 
-//       success: false,
-//       error: 'Failed to create refund',
-//       details: error instanceof Error ? error.message : 'Unknown error'
-//     });
-//   }
-// });
-
-// app.get('/api/razorpay/key', (req: Request, res: Response) => {
-//   res.json({
-//     success: true,
-//     key: process.env.RAZORPAY_KEY_ID,
-//   });
-// });
-
-// // ============================================
-// // HEALTH & INFO
-// // ============================================
-
-// app.get('/health', (req: Request, res: Response) => {
-//   res.json({
-//     status: 'ok',
-//     timestamp: new Date().toISOString(),
-//     cache: {
-//       events: eventCache.keys().length,
-//       tokens: tokenCache.keys().length
-//     },
-//     services: {
-//       agora: { configured: !!(AGORA_APP_ID && AGORA_APP_CERTIFICATE) },
-//       razorpay: { configured: !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) },
-//       serpapi: { configured: !!SERPAPI_KEY }
-//     },
-//   });
-// });
-
-// app.get('/', (req: Request, res: Response) => {
-//   res.json({
-//     name: 'LoveConnect India API',
-//     version: '2.1.0',
-//     features: ['caching', 'optimized-images', 'fast-tokens'],
-//     endpoints: {
-//       events: [
-//         'POST /api/events/fetch',
-//         'POST /api/events/fetch-nearby',
-//         'GET /api/events/featured',
-//         'GET /api/events/search'
-//       ],
-//       agora: [
-//         'POST /api/agora/token',
-//         'GET /api/agora/test'
-//       ],
-//       razorpay: [
-//         'POST /api/razorpay/create-order',
-//         'POST /api/razorpay/verify-payment',
-//         'GET /api/razorpay/payment/:id',
-//         'POST /api/razorpay/refund',
-//         'GET /api/razorpay/key'
-//       ]
-//     }
-//   });
-// });
-
-// app.use((err: Error, req: Request, res: Response, next: any) => {
-//   console.error('Unhandled error:', err);
-//   res.status(500).json({
-//     success: false,
-//     error: 'Internal server error',
-//     details: err.message
-//   });
-// });
-
-// app.use((req: Request, res: Response) => {
-//   res.status(404).json({
-//     success: false,
-//     error: 'Endpoint not found',
-//     path: req.path
-//   });
-// });
-
-// app.listen(PORT, () => {
-//   console.log(`\n🚀 Server running on port ${PORT}`);
-//   console.log(`📍 Health: http://localhost:${PORT}/health\n`);
-//   console.log('✅ Features: Caching enabled, optimized images, fast tokens');
-  
-//   if (AGORA_APP_ID && AGORA_APP_CERTIFICATE) {
-//     console.log('✅ Agora configured');
-//   } else {
-//     console.warn('⚠️  Agora not configured');
-//   }
-  
-//   if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
-//     console.log('✅ Razorpay configured');
-//   } else {
-//     console.warn('⚠️  Razorpay not configured');
-//   }
-
-//   if (SERPAPI_KEY) {
-//     console.log('✅ SerpAPI configured\n');
-//   } else {
-//     console.warn('⚠️  SerpAPI not configured\n');
-//   }
-// });
-
-// server/index.ts - Fixed with multiple event sources
+// server/index.ts - Optimized with caching and better image handling
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
@@ -2589,118 +1754,18 @@ if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
   console.error('❌ RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set');
 }
 if (!SERPAPI_KEY) {
-  console.warn('⚠️  WARNING: SERPAPI_KEY not set. Using mock data.');
+  console.warn('⚠️  WARNING: SERPAPI_KEY not set. Event fetching disabled.');
 }
 
 // ============================================
-// MOCK DATA GENERATOR (Fallback)
+// OPTIMIZED GOOGLE EVENTS API
 // ============================================
 
-function generateMockEvents(location: string, count: number = 20, category?: string): any[] {
-  const events = [];
-  
-  // Location-specific venues
-  const isMumbai = location.toLowerCase().includes('mumbai');
-  const venues = isMumbai ? [
-    'Phoenix Marketcity', 'High Street Phoenix', 'Nehru Centre', 
-    'NCPA', 'Rangasharda Auditorium', 'Prithvi Theatre',
-    'The Dome', 'Turf Club', 'Royal Opera House'
-  ] : [
-    'City Center Mall', 'Community Hall', 'Central Park',
-    'Grand Hotel', 'Convention Center', 'Town Square',
-    'Local Auditorium', 'Sports Complex', 'Cultural Center'
-  ];
-  
-  const eventTypes = [
-    { title: 'Live Music Night', category: 'concert', price: 500, description: 'An evening of soulful live music featuring local and national artists' },
-    { title: 'Stand-up Comedy Show', category: 'comedy', price: 400, description: 'Laugh out loud with top comedians performing live' },
-    { title: 'Tech Networking Meetup', category: 'networking', price: 0, description: 'Connect with tech professionals and expand your network' },
-    { title: 'Art Exhibition', category: 'art', price: 200, description: 'Explore contemporary art from emerging artists' },
-    { title: 'Food Festival', category: 'food', price: 300, description: 'Taste culinary delights from around the world' },
-    { title: 'Yoga & Wellness Workshop', category: 'fitness', price: 500, description: 'Rejuvenate your mind and body with expert-led sessions' },
-    { title: 'Theater Performance', category: 'theater', price: 600, description: 'Experience captivating storytelling on stage' },
-    { title: 'Speed Dating Event', category: 'dating', price: 800, description: 'Meet interesting singles in a fun, relaxed environment' },
-    { title: 'Business Conference', category: 'networking', price: 1000, description: 'Learn from industry leaders and grow your business' },
-    { title: 'Music Festival', category: 'concert', price: 1500, description: 'Two-day celebration of music with multiple artists' },
-    { title: 'Wine Tasting Evening', category: 'food', price: 700, description: 'Sample premium wines paired with gourmet appetizers' },
-    { title: 'Dance Workshop', category: 'fitness', price: 400, description: 'Learn new dance styles from professional instructors' },
-  ];
-
-  const images = [
-    'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800',
-    'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800',
-    'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800',
-    'https://images.unsplash.com/photo-1505236858219-8359eb29e329?w=800',
-    'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800',
-    'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=800',
-    'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
-    'https://images.unsplash.com/photo-1511632765486-a01980e01a18?w=800',
-  ];
-
-  // Filter by category if specified
-  const availableEvents = category 
-    ? eventTypes.filter(e => e.category === category)
-    : eventTypes;
-
-  if (availableEvents.length === 0) {
-    return [];
-  }
-
-  for (let i = 0; i < count; i++) {
-    const eventType = availableEvents[i % availableEvents.length];
-    
-    const daysFromNow = Math.floor(Math.random() * 30) + 1;
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() + daysFromNow);
-    startDate.setHours(18 + Math.floor(Math.random() * 4), 0, 0, 0);
-    
-    const endDate = new Date(startDate);
-    endDate.setHours(endDate.getHours() + 3);
-
-    const venue = venues[Math.floor(Math.random() * venues.length)];
-
-    events.push({
-      id: crypto.randomBytes(16).toString('hex'),
-      title: `${eventType.title}`,
-      description: eventType.description,
-      coverImage: images[Math.floor(Math.random() * images.length)],
-      venue: venue,
-      address: `${venue}, ${location}`,
-      location: {
-        latitude: 19.0760 + (Math.random() - 0.5) * 0.2,
-        longitude: 72.8777 + (Math.random() - 0.5) * 0.2,
-      },
-      startTime: startDate.toISOString(),
-      endTime: endDate.toISOString(),
-      price: eventType.price,
-      capacity: 50 + Math.floor(Math.random() * 200),
-      attendeesCount: Math.floor(Math.random() * 50),
-      category: eventType.category,
-      tags: ['popular', 'trending', eventType.category].slice(0, 3),
-      organizer: {
-        name: 'EventHub India',
-        image: 'https://ui-avatars.com/api/?name=EventHub&background=4F46E5&color=fff',
-        rating: 4.0 + Math.random(),
-        verified: true,
-      },
-      ticketInfo: [],
-      externalLink: '',
-      isOnline: Math.random() > 0.9,
-      allowMatchmaking: true,
-      featured: Math.random() > 0.7,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
-  return events;
-}
-
-// ============================================
-// FIXED GOOGLE EVENTS API
-// ============================================
-
+/**
+ * Extract best quality image from event data
+ */
 function extractBestImage(event: any): string {
+  // Priority order for images
   const imageOptions = [
     event.thumbnail,
     event.image,
@@ -2711,6 +1776,7 @@ function extractBestImage(event: any): string {
 
   for (const img of imageOptions) {
     if (img && typeof img === 'string' && img.startsWith('http')) {
+      // Try to get higher resolution version
       return img.replace(/=s\d+/, '=s1200').replace(/\/w\d+/, '/w1200');
     }
   }
@@ -2719,7 +1785,7 @@ function extractBestImage(event: any): string {
 }
 
 /**
- * FIXED: Try multiple methods to fetch events
+ * Optimized event fetching with caching
  */
 async function fetchEventsFromSerpAPI(
   location: string, 
@@ -2728,201 +1794,120 @@ async function fetchEventsFromSerpAPI(
   onlineOnly?: boolean, 
   retryWithFallback: boolean = true
 ): Promise<any> {
+  // Generate cache key
   const cacheKey = `events:${location}:${category || 'all'}:${dateFilter || 'all'}:${onlineOnly || false}`;
   
+  // Check cache first
   const cached = eventCache.get(cacheKey);
   if (cached) {
     console.log('✅ Returning cached events for:', location);
     return cached;
   }
 
-  if (!SERPAPI_KEY) {
-    console.log('⚠️  No SerpAPI key, using mock data');
-    const mockEvents = generateMockEvents(location, 20, category);
-    return {
-      events: mockEvents.map(e => transformMockEvent(e)),
-      location,
-      cached: false,
-      timestamp: new Date().toISOString(),
-      source: 'mock'
+  try {
+    // Build query
+    let query = `Events in ${location}`;
+    if (category) {
+      query = `${category} events in ${location}`;
+    }
+
+    // Build filters
+    let htichips = '';
+    const filters = [];
+    
+    if (dateFilter) {
+      filters.push(`date:${dateFilter}`);
+    }
+    
+    if (onlineOnly) {
+      filters.push('event_type:Virtual-Event');
+    }
+    
+    if (filters.length > 0) {
+      htichips = filters.join(',');
+    }
+
+    console.log('🔍 Fetching events:', { query, htichips, location });
+
+    // Call SerpAPI with timeout
+    const params: any = {
+      engine: 'google_events',
+      q: query,
+      hl: 'en',
+      gl: 'in',
+      api_key: SERPAPI_KEY,
+      num: 50, // Get more results
     };
-  }
 
-  // Try original location first
-  try {
-    console.log('🔍 Trying Method 1: Google Events API for', location);
-    const result = await tryGoogleEvents(location, category, dateFilter, onlineOnly);
-    if (result && result.events.length > 0) {
-      eventCache.set(cacheKey, result);
-      return result;
+    if (htichips) {
+      params.htichips = htichips;
     }
-  } catch (error) {
-    console.log('❌ Method 1 failed:', error instanceof Error ? error.message : 'Unknown error');
-  }
 
-  try {
-    console.log('🔍 Trying Method 2: Google Search for', location);
-    const result = await tryGoogleSearchEvents(location, category);
-    if (result && result.events.length > 0) {
-      eventCache.set(cacheKey, result);
-      return result;
-    }
-  } catch (error) {
-    console.log('❌ Method 2 failed:', error instanceof Error ? error.message : 'Unknown error');
-  }
+    const response = await axios.get(SERPAPI_BASE_URL, { 
+      params,
+      timeout: 8000 // 8 second timeout
+    });
 
-  // If retryWithFallback is enabled and original location failed, try major city
-  if (retryWithFallback) {
-    const fallbackCity = getFallbackCity(location);
-    if (fallbackCity !== location) {
-      console.log(`🔄 Trying fallback city: ${fallbackCity}`);
+    if (response.data.error) {
+      console.error('SerpAPI error:', response.data.error);
       
-      try {
-        const result = await tryGoogleEvents(fallbackCity, category, dateFilter, onlineOnly);
-        if (result && result.events.length > 0) {
-          result.originalLocation = location;
-          result.usedFallback = true;
-          eventCache.set(cacheKey, result);
-          return result;
+      if (retryWithFallback) {
+        const fallbackCity = getFallbackCity(location);
+        if (fallbackCity !== location) {
+          console.log(`Trying fallback city: ${fallbackCity}`);
+          return await fetchEventsFromSerpAPI(fallbackCity, category, dateFilter, onlineOnly, false);
         }
-      } catch (error) {
-        console.log('❌ Fallback Method 1 failed');
       }
+      
+      throw new Error(response.data.error);
+    }
 
-      try {
-        const result = await tryGoogleSearchEvents(fallbackCity, category);
-        if (result && result.events.length > 0) {
-          result.originalLocation = location;
-          result.usedFallback = true;
-          eventCache.set(cacheKey, result);
-          return result;
-        }
-      } catch (error) {
-        console.log('❌ Fallback Method 2 failed');
+    const events = response.data.events_results || [];
+
+    // Fallback if no events
+    if (events.length === 0 && retryWithFallback) {
+      const fallbackCity = getFallbackCity(location);
+      if (fallbackCity !== location) {
+        console.log(`No events in ${location}, trying: ${fallbackCity}`);
+        return await fetchEventsFromSerpAPI(fallbackCity, category, dateFilter, onlineOnly, false);
       }
     }
-  }
 
-  // Final fallback: Mock data
-  console.log('⚠️  All methods failed, using mock data for', location);
-  const mockEvents = generateMockEvents(location, 20, category);
-  const result = {
-    events: mockEvents.map(e => transformMockEvent(e)),
-    location,
-    cached: false,
-    timestamp: new Date().toISOString(),
-    source: 'mock'
-  };
-  
-  eventCache.set(cacheKey, result);
-  return result;
+    const result = {
+      events,
+      location: events.length > 0 ? location : getFallbackCity(location),
+      searchMetadata: response.data.search_metadata,
+      cached: false,
+      timestamp: new Date().toISOString()
+    };
+
+    // Cache the result
+    eventCache.set(cacheKey, result);
+    
+    return result;
+
+  } catch (error) {
+    console.error('Error fetching from SerpAPI:', error);
+    
+    if (retryWithFallback) {
+      const fallbackCity = getFallbackCity(location);
+      if (fallbackCity !== location) {
+        console.log(`Error in ${location}, trying: ${fallbackCity}`);
+        try {
+          return await fetchEventsFromSerpAPI(fallbackCity, category, dateFilter, onlineOnly, false);
+        } catch (fallbackError) {
+          throw error;
+        }
+      }
+    }
+    
+    throw error;
+  }
 }
 
-async function tryGoogleEvents(
-  location: string,
-  category?: string,
-  dateFilter?: string,
-  onlineOnly?: boolean
-): Promise<any> {
-  let query = `Events in ${location}`;
-  if (category) {
-    query = `${category} events in ${location}`;
-  }
-
-  const params: any = {
-    engine: 'google_events',
-    q: query,
-    hl: 'en',
-    gl: 'in',
-    api_key: SERPAPI_KEY,
-  };
-
-  if (dateFilter) {
-    params.htichips = `date:${dateFilter}`;
-  }
-
-  console.log('📤 SerpAPI Request:', params);
-
-  const response = await axios.get(SERPAPI_BASE_URL, { 
-    params,
-    timeout: 10000
-  });
-
-  console.log('📥 Response status:', response.status);
-  console.log('📥 Response keys:', Object.keys(response.data));
-
-  if (response.data.error) {
-    throw new Error(response.data.error);
-  }
-
-  const events = response.data.events_results || [];
-  
-  if (events.length === 0) {
-    throw new Error('No events found');
-  }
-
-  return {
-    events: events.map((e: any) => transformEvent(e, category)),
-    location,
-    cached: false,
-    timestamp: new Date().toISOString(),
-    source: 'google_events'
-  };
-}
-
-async function tryGoogleSearchEvents(location: string, category?: string): Promise<any> {
-  // Try the original location first
-  let searchLocation = location;
-  
-  const query = category 
-    ? `${category} events in ${searchLocation}`
-    : `events in ${searchLocation}`;
-
-  const params: any = {
-    engine: 'google',
-    q: query,
-    hl: 'en',
-    gl: 'in',
-    api_key: SERPAPI_KEY,
-  };
-
-  console.log('📤 Google Search Request:', params);
-
-  const response = await axios.get(SERPAPI_BASE_URL, { 
-    params,
-    timeout: 10000
-  });
-
-  if (response.data.error) {
-    throw new Error(response.data.error);
-  }
-
-  // Parse organic results that might contain event info
-  const organicResults = response.data.organic_results || [];
-  
-  if (organicResults.length === 0) {
-    throw new Error('No results found');
-  }
-
-  // Transform search results into event format
-  const events = organicResults.slice(0, 20).map((result: any, index: number) => ({
-    title: result.title || `Event ${index + 1}`,
-    description: result.snippet || '',
-    link: result.link || '',
-    date: { start_date: new Date().toDateString() },
-    address: [searchLocation],
-    venue: { name: searchLocation },
-  }));
-
-  return {
-    events: events.map((e: any) => transformEvent(e, category)),
-    location: searchLocation,
-    cached: false,
-    timestamp: new Date().toISOString(),
-    source: 'google_search'
-  };
-}
-
+/**
+ * Transform event data with optimized image handling
+ */
 function transformEvent(event: any, category?: string): any {
   return {
     id: crypto.randomBytes(16).toString('hex'),
@@ -2955,10 +1940,6 @@ function transformEvent(event: any, category?: string): any {
   };
 }
 
-function transformMockEvent(event: any): any {
-  return event;
-}
-
 /**
  * Fetch events by location
  * POST /api/events/fetch
@@ -2974,19 +1955,28 @@ app.post('/api/events/fetch', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await fetchEventsFromSerpAPI(location, category, dateFilter, onlineOnly);
+    if (!SERPAPI_KEY) {
+      return res.status(503).json({
+        success: false,
+        error: 'SerpAPI key not configured'
+      });
+    }
 
-    console.log(`✅ Fetched ${result.events.length} events for ${result.location} (source: ${result.source})`);
+    const result = await fetchEventsFromSerpAPI(location, category, dateFilter, onlineOnly);
+    const events = result.events || [];
+
+    const transformedEvents = events.map((event: any) => transformEvent(event, category));
+
+    console.log(`✅ Fetched ${transformedEvents.length} events for ${result.location}`);
 
     res.json({
       success: true,
-      count: result.events.length,
+      count: transformedEvents.length,
       location: result.location,
       originalLocation: location,
       usedFallback: result.location !== location,
       cached: result.cached || false,
-      source: result.source || 'unknown',
-      events: result.events,
+      events: transformedEvents,
       timestamp: result.timestamp
     });
 
@@ -3001,7 +1991,7 @@ app.post('/api/events/fetch', async (req: Request, res: Response) => {
 });
 
 /**
- * Fetch events by coordinates
+ * Fetch events by coordinates (optimized)
  * POST /api/events/fetch-nearby
  */
 app.post('/api/events/fetch-nearby', async (req: Request, res: Response) => {
@@ -3018,10 +2008,11 @@ app.post('/api/events/fetch-nearby', async (req: Request, res: Response) => {
     const location = cityName || 'Mumbai, India';
 
     const result = await fetchEventsFromSerpAPI(location, category);
+    const events = result.events || [];
 
-    const transformedEvents = result.events.map((event: any) => ({
-      ...event,
-      location: event.location || { latitude, longitude }
+    const transformedEvents = events.map((event: any) => ({
+      ...transformEvent(event, category),
+      location: event.venue?.gps_coordinates || { latitude, longitude }
     }));
 
     res.json({
@@ -3031,7 +2022,6 @@ app.post('/api/events/fetch-nearby', async (req: Request, res: Response) => {
       originalLocation: location,
       usedFallback: result.location !== location,
       cached: result.cached || false,
-      source: result.source || 'unknown',
       coordinates: { latitude, longitude },
       radius,
       events: transformedEvents,
@@ -3049,18 +2039,27 @@ app.post('/api/events/fetch-nearby', async (req: Request, res: Response) => {
 });
 
 /**
- * Get featured events
+ * Get featured events (cached)
  * GET /api/events/featured
  */
 app.get('/api/events/featured', async (req: Request, res: Response) => {
   try {
     const { limit = 10, location = 'Mumbai, India' } = req.query;
 
-    const result = await fetchEventsFromSerpAPI(location as string, undefined, undefined, undefined, true);
+    if (!SERPAPI_KEY) {
+      return res.status(503).json({
+        success: false,
+        error: 'SerpAPI key not configured'
+      });
+    }
 
-    const featuredEvents = result.events
-      .filter((e: any) => e.featured || e.organizer?.rating >= 4.0)
-      .slice(0, parseInt(limit as string));
+    const result = await fetchEventsFromSerpAPI(location as string, undefined, undefined, undefined, true);
+    const events = result.events || [];
+
+    const featuredEvents = events
+      .filter((e: any) => e.venue?.rating && e.venue.rating >= 4.0)
+      .slice(0, parseInt(limit as string))
+      .map((event: any) => transformEvent(event));
 
     res.json({
       success: true,
@@ -3068,7 +2067,6 @@ app.get('/api/events/featured', async (req: Request, res: Response) => {
       location: result.location,
       usedFallback: result.location !== location,
       cached: result.cached || false,
-      source: result.source || 'unknown',
       events: featuredEvents,
       timestamp: result.timestamp
     });
@@ -3084,7 +2082,7 @@ app.get('/api/events/featured', async (req: Request, res: Response) => {
 });
 
 /**
- * Search events
+ * Search events (optimized)
  * GET /api/events/search
  */
 app.get('/api/events/search', async (req: Request, res: Response) => {
@@ -3098,12 +2096,22 @@ app.get('/api/events/search', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await fetchEventsFromSerpAPI(location as string, undefined, dateFilter as string, undefined, true);
+    if (!SERPAPI_KEY) {
+      return res.status(503).json({
+        success: false,
+        error: 'SerpAPI key not configured'
+      });
+    }
 
-    const filteredEvents = result.events.filter((event: any) => {
-      const searchText = `${event.title} ${event.description}`.toLowerCase();
-      return searchText.includes((q as string).toLowerCase());
-    });
+    const result = await fetchEventsFromSerpAPI(location as string, undefined, dateFilter as string, undefined, true);
+    const events = result.events || [];
+
+    const filteredEvents = events
+      .filter((event: any) => {
+        const searchText = `${event.title} ${event.description}`.toLowerCase();
+        return searchText.includes((q as string).toLowerCase());
+      })
+      .map((event: any) => transformEvent(event, category as string));
 
     res.json({
       success: true,
@@ -3112,7 +2120,6 @@ app.get('/api/events/search', async (req: Request, res: Response) => {
       location: result.location,
       usedFallback: result.location !== location,
       cached: result.cached || false,
-      source: result.source || 'unknown',
       events: filteredEvents,
       timestamp: result.timestamp
     });
@@ -3229,7 +2236,7 @@ function extractTags(title: string, description: string): string[] {
 }
 
 // ============================================
-// AGORA ENDPOINTS
+// OPTIMIZED AGORA ENDPOINTS
 // ============================================
 
 app.post('/api/agora/token', (req: Request, res: Response) => {
@@ -3250,6 +2257,7 @@ app.post('/api/agora/token', (req: Request, res: Response) => {
       });
     }
 
+    // Check cache first
     const cacheKey = `agora:${channelName}:${uid}:${role}`;
     const cached = tokenCache.get(cacheKey);
     
@@ -3261,7 +2269,7 @@ app.post('/api/agora/token', (req: Request, res: Response) => {
     const uidNum = parseInt(uid.toString()) || 0;
     const userRole = role === 'publisher' ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
     
-    const expirationTimeInSeconds = 86400;
+    const expirationTimeInSeconds = 86400; // 24 hours
     const currentTimestamp = Math.floor(Date.now() / 1000);
     const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
 
@@ -3284,6 +2292,7 @@ app.post('/api/agora/token', (req: Request, res: Response) => {
       cached: false
     };
 
+    // Cache the token
     tokenCache.set(cacheKey, result);
 
     res.json(result);
@@ -3441,8 +2450,8 @@ app.get('/health', (req: Request, res: Response) => {
 app.get('/', (req: Request, res: Response) => {
   res.json({
     name: 'LoveConnect India API',
-    version: '2.2.0',
-    features: ['multi-source-events', 'fallback-mock-data', 'caching'],
+    version: '2.1.0',
+    features: ['caching', 'optimized-images', 'fast-tokens'],
     endpoints: {
       events: [
         'POST /api/events/fetch',
@@ -3485,7 +2494,7 @@ app.use((req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
   console.log(`📍 Health: http://localhost:${PORT}/health\n`);
-  console.log('✅ Features: Multi-source events, fallback mock data, caching');
+  console.log('✅ Features: Caching enabled, optimized images, fast tokens');
   
   if (AGORA_APP_ID && AGORA_APP_CERTIFICATE) {
     console.log('✅ Agora configured');
@@ -3500,13 +2509,9 @@ app.listen(PORT, () => {
   }
 
   if (SERPAPI_KEY) {
-    console.log('✅ SerpAPI configured - will try multiple methods');
+    console.log('✅ SerpAPI configured\n');
   } else {
-    console.warn('⚠️  SerpAPI not configured - using mock data only');
+    console.warn('⚠️  SerpAPI not configured\n');
   }
-  
-  console.log('\n📝 Event Sources Priority:');
-  console.log('   1. Google Events API');
-  console.log('   2. Google Search with event filter');
-  console.log('   3. Mock data (fallback)\n');
 });
+
