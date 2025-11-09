@@ -2515,8 +2515,6 @@
 //   }
 // });
 
-
-
 // server/index.ts - Fixed with multiple event sources
 import express, { Request, Response } from 'express';
 import cors from 'cors';
@@ -2600,21 +2598,32 @@ if (!SERPAPI_KEY) {
 
 function generateMockEvents(location: string, count: number = 20, category?: string): any[] {
   const events = [];
-  const venues = [
+  
+  // Location-specific venues
+  const isMumbai = location.toLowerCase().includes('mumbai');
+  const venues = isMumbai ? [
     'Phoenix Marketcity', 'High Street Phoenix', 'Nehru Centre', 
     'NCPA', 'Rangasharda Auditorium', 'Prithvi Theatre',
     'The Dome', 'Turf Club', 'Royal Opera House'
+  ] : [
+    'City Center Mall', 'Community Hall', 'Central Park',
+    'Grand Hotel', 'Convention Center', 'Town Square',
+    'Local Auditorium', 'Sports Complex', 'Cultural Center'
   ];
   
   const eventTypes = [
-    { title: 'Live Music Night', category: 'concert', price: 500 },
-    { title: 'Stand-up Comedy Show', category: 'comedy', price: 400 },
-    { title: 'Tech Networking Meetup', category: 'networking', price: 0 },
-    { title: 'Art Exhibition', category: 'art', price: 200 },
-    { title: 'Food Festival', category: 'food', price: 300 },
-    { title: 'Yoga & Wellness Workshop', category: 'fitness', price: 500 },
-    { title: 'Theater Performance', category: 'theater', price: 600 },
-    { title: 'Speed Dating Event', category: 'dating', price: 800 },
+    { title: 'Live Music Night', category: 'concert', price: 500, description: 'An evening of soulful live music featuring local and national artists' },
+    { title: 'Stand-up Comedy Show', category: 'comedy', price: 400, description: 'Laugh out loud with top comedians performing live' },
+    { title: 'Tech Networking Meetup', category: 'networking', price: 0, description: 'Connect with tech professionals and expand your network' },
+    { title: 'Art Exhibition', category: 'art', price: 200, description: 'Explore contemporary art from emerging artists' },
+    { title: 'Food Festival', category: 'food', price: 300, description: 'Taste culinary delights from around the world' },
+    { title: 'Yoga & Wellness Workshop', category: 'fitness', price: 500, description: 'Rejuvenate your mind and body with expert-led sessions' },
+    { title: 'Theater Performance', category: 'theater', price: 600, description: 'Experience captivating storytelling on stage' },
+    { title: 'Speed Dating Event', category: 'dating', price: 800, description: 'Meet interesting singles in a fun, relaxed environment' },
+    { title: 'Business Conference', category: 'networking', price: 1000, description: 'Learn from industry leaders and grow your business' },
+    { title: 'Music Festival', category: 'concert', price: 1500, description: 'Two-day celebration of music with multiple artists' },
+    { title: 'Wine Tasting Evening', category: 'food', price: 700, description: 'Sample premium wines paired with gourmet appetizers' },
+    { title: 'Dance Workshop', category: 'fitness', price: 400, description: 'Learn new dance styles from professional instructors' },
   ];
 
   const images = [
@@ -2623,14 +2632,24 @@ function generateMockEvents(location: string, count: number = 20, category?: str
     'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800',
     'https://images.unsplash.com/photo-1505236858219-8359eb29e329?w=800',
     'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800',
+    'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=800',
+    'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
+    'https://images.unsplash.com/photo-1511632765486-a01980e01a18?w=800',
   ];
 
+  // Filter by category if specified
+  const availableEvents = category 
+    ? eventTypes.filter(e => e.category === category)
+    : eventTypes;
+
+  if (availableEvents.length === 0) {
+    return [];
+  }
+
   for (let i = 0; i < count; i++) {
-    const eventType = category 
-      ? eventTypes.find(e => e.category === category) || eventTypes[0]
-      : eventTypes[Math.floor(Math.random() * eventTypes.length)];
+    const eventType = availableEvents[i % availableEvents.length];
     
-    const daysFromNow = Math.floor(Math.random() * 30);
+    const daysFromNow = Math.floor(Math.random() * 30) + 1;
     const startDate = new Date();
     startDate.setDate(startDate.getDate() + daysFromNow);
     startDate.setHours(18 + Math.floor(Math.random() * 4), 0, 0, 0);
@@ -2638,13 +2657,15 @@ function generateMockEvents(location: string, count: number = 20, category?: str
     const endDate = new Date(startDate);
     endDate.setHours(endDate.getHours() + 3);
 
+    const venue = venues[Math.floor(Math.random() * venues.length)];
+
     events.push({
       id: crypto.randomBytes(16).toString('hex'),
-      title: `${eventType.title} ${i + 1}`,
-      description: `Join us for an amazing ${eventType.title.toLowerCase()} experience in ${location}. Perfect for making new connections!`,
+      title: `${eventType.title}`,
+      description: eventType.description,
       coverImage: images[Math.floor(Math.random() * images.length)],
-      venue: venues[Math.floor(Math.random() * venues.length)],
-      address: `${venues[Math.floor(Math.random() * venues.length)]}, ${location}`,
+      venue: venue,
+      address: `${venue}, ${location}`,
       location: {
         latitude: 19.0760 + (Math.random() - 0.5) * 0.2,
         longitude: 72.8777 + (Math.random() - 0.5) * 0.2,
@@ -2655,16 +2676,16 @@ function generateMockEvents(location: string, count: number = 20, category?: str
       capacity: 50 + Math.floor(Math.random() * 200),
       attendeesCount: Math.floor(Math.random() * 50),
       category: eventType.category,
-      tags: ['trending', 'popular', 'new'],
+      tags: ['popular', 'trending', eventType.category].slice(0, 3),
       organizer: {
-        name: 'Event Organizer',
-        image: 'https://ui-avatars.com/api/?name=Event+Organizer',
+        name: 'EventHub India',
+        image: 'https://ui-avatars.com/api/?name=EventHub&background=4F46E5&color=fff',
         rating: 4.0 + Math.random(),
-        verified: Math.random() > 0.5,
+        verified: true,
       },
       ticketInfo: [],
       externalLink: '',
-      isOnline: Math.random() > 0.8,
+      isOnline: Math.random() > 0.9,
       allowMatchmaking: true,
       featured: Math.random() > 0.7,
       createdAt: new Date().toISOString(),
@@ -2727,9 +2748,9 @@ async function fetchEventsFromSerpAPI(
     };
   }
 
+  // Try original location first
   try {
-    // METHOD 1: Try Google Events engine first
-    console.log('🔍 Trying Method 1: Google Events API');
+    console.log('🔍 Trying Method 1: Google Events API for', location);
     const result = await tryGoogleEvents(location, category, dateFilter, onlineOnly);
     if (result && result.events.length > 0) {
       eventCache.set(cacheKey, result);
@@ -2740,8 +2761,7 @@ async function fetchEventsFromSerpAPI(
   }
 
   try {
-    // METHOD 2: Try Google Search with event filter
-    console.log('🔍 Trying Method 2: Google Search with event filter');
+    console.log('🔍 Trying Method 2: Google Search for', location);
     const result = await tryGoogleSearchEvents(location, category);
     if (result && result.events.length > 0) {
       eventCache.set(cacheKey, result);
@@ -2751,8 +2771,40 @@ async function fetchEventsFromSerpAPI(
     console.log('❌ Method 2 failed:', error instanceof Error ? error.message : 'Unknown error');
   }
 
-  // METHOD 3: Fallback to mock data
-  console.log('⚠️  All methods failed, using mock data');
+  // If retryWithFallback is enabled and original location failed, try major city
+  if (retryWithFallback) {
+    const fallbackCity = getFallbackCity(location);
+    if (fallbackCity !== location) {
+      console.log(`🔄 Trying fallback city: ${fallbackCity}`);
+      
+      try {
+        const result = await tryGoogleEvents(fallbackCity, category, dateFilter, onlineOnly);
+        if (result && result.events.length > 0) {
+          result.originalLocation = location;
+          result.usedFallback = true;
+          eventCache.set(cacheKey, result);
+          return result;
+        }
+      } catch (error) {
+        console.log('❌ Fallback Method 1 failed');
+      }
+
+      try {
+        const result = await tryGoogleSearchEvents(fallbackCity, category);
+        if (result && result.events.length > 0) {
+          result.originalLocation = location;
+          result.usedFallback = true;
+          eventCache.set(cacheKey, result);
+          return result;
+        }
+      } catch (error) {
+        console.log('❌ Fallback Method 2 failed');
+      }
+    }
+  }
+
+  // Final fallback: Mock data
+  console.log('⚠️  All methods failed, using mock data for', location);
   const mockEvents = generateMockEvents(location, 20, category);
   const result = {
     events: mockEvents.map(e => transformMockEvent(e)),
@@ -2819,16 +2871,18 @@ async function tryGoogleEvents(
 }
 
 async function tryGoogleSearchEvents(location: string, category?: string): Promise<any> {
+  // Try the original location first
+  let searchLocation = location;
+  
   const query = category 
-    ? `${category} events in ${location}`
-    : `upcoming events in ${location}`;
+    ? `${category} events in ${searchLocation}`
+    : `events in ${searchLocation}`;
 
   const params: any = {
     engine: 'google',
     q: query,
     hl: 'en',
     gl: 'in',
-    tbm: 'evnt', // Event search
     api_key: SERPAPI_KEY,
   };
 
@@ -2856,13 +2910,13 @@ async function tryGoogleSearchEvents(location: string, category?: string): Promi
     description: result.snippet || '',
     link: result.link || '',
     date: { start_date: new Date().toDateString() },
-    address: [location],
-    venue: { name: location },
+    address: [searchLocation],
+    venue: { name: searchLocation },
   }));
 
   return {
     events: events.map((e: any) => transformEvent(e, category)),
-    location,
+    location: searchLocation,
     cached: false,
     timestamp: new Date().toISOString(),
     source: 'google_search'
